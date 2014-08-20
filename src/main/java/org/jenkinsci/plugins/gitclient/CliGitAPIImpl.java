@@ -739,7 +739,46 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                         args.add("--reference", ref);
                 }
 
-                launchCommandIn(args, workspace, environment, timeout);
+                List<IndexEntry> submodules;
+                try {
+                    submodules = getSubmodules("HEAD");
+                } catch (GitException e) {
+                    // *shrug* oh well, we tried. Run the command for all sub-
+                    // modules simultaneously with no credentials (there probably
+                    // aren't any remotes, if there's no HEAD) and hope it works.
+                    listener.getLogger().println("getSubmodules() is messed up: " + e);
+                    launchCommand(args);
+                    return;
+                }
+
+                for (IndexEntry submodule : submodules) {
+                    ArgumentListBuilder submoduleArgs = args.clone();
+                    String submoduleName = submodule.getFile();
+                    String submoduleUrl;
+                    try {
+                        submoduleUrl = getSubmoduleUrl(submoduleName);
+                    } catch (GitException e) {
+                        // This is another case like above. Most likely the submodules
+                        // have not been initialized. We could call fixSubmoduleUrls
+                        // but that seems invasive here. Cop out like above.
+                        listener.getLogger().println("getSubmoduleUrl() is messed up: " + e);
+                        launchCommand(args);
+                        return;
+                    }
+                    submoduleArgs.add("--");
+                    submoduleArgs.add(submoduleName);
+
+                    // Trying the default authentication
+                    StandardCredentials cred = defaultCredentials;
+
+                    // Trying the credentials of the first repository
+                    Iterator it = credentials.entrySet().iterator();
+                    if (cred == null && it.hasNext()) {
+                        cred = credentials.entrySet().iterator().next().getValue();
+                    }
+
+                    launchCommandWithCredentials(submoduleArgs, workspace, cred, submoduleUrl);
+                }
             }
         };
     }
